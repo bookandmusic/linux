@@ -1,0 +1,25 @@
+version: '3'
+
+networks:
+  localNetwork:
+    external: true
+
+services:
+  sftpgo:
+    container_name: sftpgo
+    image: drakkan/sftpgo:edge-distroless-slim
+    restart: always
+    ports:
+      - "8080:8080"
+      - "2022:2022"
+      - "8090:8090"
+    volumes:
+      - "/container/sftpgo/data:/srv/sftpgo"
+      - "/container/sftpgo/home:/var/lib/sftpgo"
+    environment:
+      - TZ=Asia/Shanghai
+      - SFTPGO_HTTPD__BINDINGS__0__PORT=8080
+      - SFTPGO_WEBDAVD__BINDINGS__0__PORT=8090
+    user: "1000:1000"
+    networks:
+      - localNetwork

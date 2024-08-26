@@ -1,0 +1,13 @@
+networks:
+    localNetwork:
+        external: true
+services:
+    bitwarden:
+        container_name: bitwarden
+        image: vaultwarden/server:latest
+        networks:
+            - localNetwork
+        restart: always
+        volumes:
+            - /container/bitwarden/data:/data
+version: "3"

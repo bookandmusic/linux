@@ -1,0 +1,42 @@
+networks:
+    localNetwork:
+        external: true
+      
+services:
+  siyuan:
+    cpu_shares: 90
+    command:
+      - --workspace=/siyuan/workspace/
+      - --accessAuthCode=Grill0266
+    container_name: siyuan
+    environment:
+      - TZ=Asia/Shanghai
+    hostname: siyuan
+    image: apkdv/siyuan-unlock:v103.0.9
+    networks:
+      - localNetwork
+    ports:
+      - mode: ingress
+        target: 6806
+        published: "6806"
+        protocol: tcp
+    restart: unless-stopped
+    user: 0:0
+    volumes:
+      - type: bind
+        source: /container/siyuan/workspace
+        target: /siyuan/workspace
+        bind:
+          create_host_path: true
+    privileged: false
+    
+x-casaos:
+  author: self
+  category: self
+  hostname: siyuan.bookandmusic.cn
+  icon: ""
+  index: /
+  port_map: ""
+  scheme: https
+  title:
+    custom: 思源笔记

@@ -1,0 +1,21 @@
+version: "3"
+services:
+  poratiner_ce:
+    image: 6053537/portainer-ce:2.19.1
+    container_name: portainer_ce
+    ports:
+      - '9000:9000'
+    networks:
+      - localNetwork
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - '/container/portainer/data:/data'
+      - '/container:/container'
+    restart: on-failure:5
+    environment:
+      - PUID=1000
+      - PGID=1000
+
+networks:
+  localNetwork:
+    driver: bridge

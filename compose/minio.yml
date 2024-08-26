@@ -1,0 +1,19 @@
+networks:
+    localNetwork:
+        external: true
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    networks:
+      - localNetwork
+    ports:
+      - "9090:9000"
+      - "9191:9001"
+    volumes:
+      - ./data:/data
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin123"
+    command: server --console-address ":9001" /data

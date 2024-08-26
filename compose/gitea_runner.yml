@@ -1,0 +1,21 @@
+version: "3"
+services:
+  gitea_runner:
+    image: gitea/act_runner:nightly
+    container_name: gitea_runner
+    networks:
+      - localNetwork
+    environment:
+      - CONFIG_FILE=/conf/config.yaml
+      - GITEA_INSTANCE_URL=https://gitea.bookandmusic.cn
+      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_REGISTRATION_TOKEN}
+      - GITEA_RUNNER_NAME=gitea_runner
+    restart: always
+    volumes:
+      - /container/gitea_runner/conf:/conf
+      - /container/gitea_runner/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+networks:
+  localNetwork:
+    external: true

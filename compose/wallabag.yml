@@ -1,0 +1,20 @@
+networks:
+    localNetwork:
+        external: true
+
+version: "3"
+services:
+  wallabag:
+    user: "root:root"
+    image: wallabag/wallabag:2.6.7
+    container_name: wallabag
+    privileged: true
+    environment:
+      - SYMFONY__ENV__DOMAIN_NAME=https://wallabag.bookandmusic.cn
+    volumes:
+      - /container/wallabag/data:/var/www/wallabag/data
+      - /container/wallabag/images:/var/www/wallabag/web/assets/images
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - localNetwork

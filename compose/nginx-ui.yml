@@ -1,0 +1,22 @@
+version: "3"
+services:
+  nginx-ui:
+    image: uozi/nginx-ui:latest
+    container_name: nginx-ui
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - /container/nginx-ui/nginx:/etc/nginx
+      - /container/nginx-ui/nginx-ui:/etc/nginx-ui
+      - /var/www/html:/var/www/html
+    ports:
+      - "80:80"
+      - "443:443"
+      - "9999:9000"
+    networks:
+      - localNetwork
+
+networks:
+  localNetwork:
+    external: true
