@@ -1,0 +1,292 @@
+# Default values in this YAML file are specified by `null` instead of Lima's "builtin default" values,
+# so they can be overridden by the $LIMA_HOME/_config/default.yaml mechanism documented at the end of this file.
+
+# VM type: "qemu" or "vz" (on macOS 13 and later).
+# The vmType can be specified only on creating the instance.
+# The vmType of existing instances cannot be changed.
+# 🟢 Builtin default: "qemu"
+vmType: qemu
+
+# OS: "Linux".
+# 🟢 Builtin default: "Linux"
+os: Linux
+
+# Arch: "default", "x86_64", "aarch64".
+# 🟢 Builtin default: "default" (corresponds to the host architecture)
+arch: x86_64
+
+# OpenStack-compatible disk image.
+# 🟢 Builtin default: null (must be specified)
+# 🔵 This file: Ubuntu images
+images:
+# Try to use release-yyyyMMdd image if available. Note that release-yyyyMMdd will be removed after several months.
+# - location: "https://cloud-images.ubuntu.com/releases/24.04/release-20240809/ubuntu-24.04-server-cloudimg-amd64.img"
+#   arch: "x86_64"
+#   digest: "sha256:dd8b691b3f0d1e61f01ae0d857dcb3088d1d8bf4148439bd07abc081e4fc31f8"
+# - location: "https://cloud-images.ubuntu.com/releases/24.04/release-20240809/ubuntu-24.04-server-cloudimg-arm64.img"
+#   arch: "aarch64"
+#   digest: "sha256:2e0c90562af1970ffff220a5073a7830f4acc2aad55b31593003e8c363381e7a"
+# # Fallback to the latest release image.
+# # Hint: run `limactl prune` to invalidate the cache
+# - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+#   arch: "x86_64"
+# - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+#   arch: "aarch64"
+  - location: /Users/liusf/project/lima/noble-server-cloudimg-amd64.img
+    arch: "x86_64"
+
+# CPUs
+# 🟢 Builtin default: min(4, host CPU cores)
+cpus: 4
+
+# Memory size
+# 🟢 Builtin default: min("4GiB", half of host memory)
+memory: 4GB
+
+# Disk size
+# 🟢 Builtin default: "100GiB"
+disk: 100GB
+
+# Expose host directories to the guest, the mount point might be accessible from all UIDs in the guest
+# 🟢 Builtin default: null (Mount nothing)
+# 🔵 This file: Mount the home as read-only, /tmp/lima as writable
+mounts:
+- location: "~"
+  writable: true
+ 
+- location: "/tmp/lima"
+  writable: true
+
+# containerd is managed by Docker, not by Lima, so the values are set to false here.
+containerd:
+  system: false
+  user: false
+
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    sed -i 's/host.lima.internal.*/host.lima.internal host.docker.internal/' /etc/hosts
+    sed -i 's@//.*archive.ubuntu.com@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list
+    sed -i 's@//.*archive.ubuntu.com@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/ubuntu.sources
+    apt-get update && apt-get install -y curl wget apt-transport-https ca-certificates
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v docker >/dev/null 2>&1 && exit 0
+    export DEBIAN_FRONTEND=noninteractive
+    
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu \
+      "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    # NOTE: you may remove the lines below, if you prefer to use rootful docker, not rootless
+    systemctl disable --now docker
+    apt-get install -y uidmap dbus-user-session
+# See <https://kubernetes.io/docs/setup/production-environment/container-runtimes/>
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    mkdir -p /etc/containerd
+    containerd config default > /etc/containerd/config.toml
+    sed -i 's#sandbox_image = "registry.k8s.io/pause:[^"]*"#sandbox_image = "registry.aliyuncs.com/google_containers/pause:3.9"#' /etc/containerd/config.toml
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    sed -i '/\[plugins\."io.containerd.grpc.v1.cri"\.registry\]/,/config_path/s#config_path = ""#config_path = "/etc/containerd/certs.d"#' /etc/containerd/config.toml
+    mkdir /etc/containerd/certs.d/docker.io -pv
+    cat > /etc/containerd/certs.d/docker.io/hosts.toml << EOF
+    server = "https://docker.io"
+    [host."https://dockerproxy.cn"]
+      capabilities = ["pull", "resolve"]
+    EOF
+    systemctl restart containerd
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v podman >/dev/null 2>&1 && exit 0
+    apt-get -y install podman
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v kubeadm >/dev/null 2>&1 && exit 0
+    # Install and configure prerequisites
+    cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
+    overlay
+    br_netfilter
+    EOF
+    modprobe overlay
+    modprobe br_netfilter
+    cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri.conf
+    net.bridge.bridge-nf-call-iptables  = 1
+    net.ipv4.ip_forward                 = 1
+    net.bridge.bridge-nf-call-ip6tables = 1
+    EOF
+    sysctl --system
+    # Installing kubeadm, kubelet and kubectl
+    export DEBIAN_FRONTEND=noninteractive
+    curl -fsSL https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.29/deb/Release.key |
+        gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.29/deb/ /" |
+        tee /etc/apt/sources.list.d/kubernetes.list
+    apt-get update
+    # cri-tools
+    apt-get install -y cri-tools
+    cat <<EOF | sudo tee /etc/crictl.yaml
+    runtime-endpoint: unix:///run/containerd/containerd.sock
+    EOF
+    # cni-plugins
+    apt-get install -y kubernetes-cni
+    rm -f /etc/cni/net.d/*.conf*
+    apt-get install -y kubelet kubeadm kubectl && apt-mark hold kubelet kubeadm kubectl
+    systemctl enable --now kubelet
+# See <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    kubeadm config images list --kubernetes-version=1.29.7
+    kubeadm config images pull --cri-socket=unix:///run/containerd/containerd.sock --image-repository=registry.aliyuncs.com/google_containers --kubernetes-version=1.29.7
+    # Initializing your control-plane node
+    cat > kubeadm-config.yaml <<EOF 
+    kind: InitConfiguration
+    apiVersion: kubeadm.k8s.io/v1beta3
+    nodeRegistration:
+      criSocket: unix:///run/containerd/containerd.sock
+    ---
+    kind: ClusterConfiguration
+    apiVersion: kubeadm.k8s.io/v1beta3
+    imageRepository: registry.aliyuncs.com/google_containers
+    kubernetesVersion: 1.29.7
+    apiServer:
+      certSANs: # --apiserver-cert-extra-sans
+      - "127.0.0.1"
+    networking:
+      podSubnet: "10.244.0.0/16" # --pod-network-cidr
+    ---
+    kind: KubeletConfiguration
+    apiVersion: kubelet.config.k8s.io/v1beta1
+    cgroupDriver: systemd
+    EOF
+    kubeadm init --config kubeadm-config.yaml
+    # Installing a Pod network add-on
+    kubectl apply -f https://mirror.ghproxy.com/https://raw.githubusercontent.com/flannel-io/flannel/v0.25.5/Documentation/kustomization/kube-flannel/kube-flannel.yml
+    # Control plane node isolation
+    kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+    # Replace the server address with localhost, so that it works also from the host
+    export KUBECONFIG=/etc/kubernetes/admin.conf
+    sed -e "/server:/ s|https://.*:\([0-9]*\)$|https://127.0.0.1:\1|" -i $KUBECONFIG
+    mkdir -p ${HOME:-/root}/.kube && cp -f $KUBECONFIG ${HOME:-/root}/.kube/config
+- mode: user
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    export KUBECONFIG=/etc/kubernetes/admin.conf
+    mkdir -p {{.Home}}/.kube
+    sudo cp -f $KUBECONFIG {{.Home}}/.kube/config
+    sudo chown -R {{.User}} {{.Home}}/.kube
+- mode: user
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    systemctl --user start dbus
+    dockerd-rootless-setuptool.sh install
+    docker context use rootless
+- mode: user
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    systemctl --user enable --now podman.socket
+probes:
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    if ! timeout 30s bash -c "until command -v docker >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "docker is not installed yet"
+      exit 1
+    fi
+    if ! timeout 30s bash -c "until pgrep rootlesskit; do sleep 3; done"; then
+      echo >&2 "rootlesskit (used by rootless docker) is not running"
+      exit 1
+    fi
+  hint: See "/var/log/cloud-init-output.log". in the guest
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    if ! timeout 30s bash -c "until command -v podman >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "podman is not installed yet"
+      exit 1
+    fi
+  hint: See "/var/log/cloud-init-output.log" in the guest
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    if ! timeout 30s bash -c "until command -v kubeadm >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "kubeadm is not installed yet"
+      exit 1
+    fi
+  hint: |
+    See "/var/log/cloud-init-output.log". in the guest
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    if ! timeout 300s bash -c "until test -f /etc/kubernetes/admin.conf; do sleep 3; done"; then
+      echo >&2 "k8s is not running yet"
+      exit 1
+    fi
+  hint: |
+    The k8s kubeconfig file has not yet been created.
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    if ! timeout 300s bash -c "until kubectl version >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "kubernetes cluster is not up and running yet"
+      exit 1
+    fi
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    kubectl wait -n kube-system --timeout=180s --for=condition=available deploy coredns
+
+hostResolver:
+  # hostResolver.hosts requires lima 0.8.3 or later. Names defined here will also
+  # resolve inside containers, and not just inside the VM itself.
+  hosts:
+    host.docker.internal: host.lima.internal
+
+copyToHost:
+- guest: "/etc/kubernetes/admin.conf"
+  host: "{{.Dir}}/copied-from-guest/kubeconfig.yaml"
+  deleteOnStop: true
+portForwards:
+- guestSocket: "/run/user/{{.UID}}/docker.sock"
+  hostSocket: "{{.Dir}}/sock/docker.sock"
+- guestSocket: "/run/user/{{.UID}}/podman/podman.sock"
+  hostSocket: "{{.Dir}}/sock/podman.sock"
+
+message: |
+  To run `kubectl` on the host (assumes kubectl is installed), run the following commands:
+  ------
+  export KUBECONFIG="{{.Dir}}/copied-from-guest/kubeconfig.yaml"
+  kubectl ...
+  ------
+  To run `docker` on the host (assumes docker-cli is installed), run the following commands:
+  ------
+  export DOCKER_HOST=unix://{{.Dir}}/sock/docker.sock
+  docker context create lima-{{.Name}} --docker "host=unix://{{.Dir}}/sock/docker.sock"
+  docker context use lima-{{.Name}}
+  docker run hello-world
+  ------
+    To run `podman` on the host (assumes podman-remote is installed), run the following commands:
+  ------
+  podman system connection add lima-{{.Name}} "unix://{{.Dir}}/sock/podman.sock"
+  podman system connection default lima-{{.Name}}
+  podman{{if eq .HostOS "linux"}} --remote{{end}} run quay.io/podman/hello
+  ------
